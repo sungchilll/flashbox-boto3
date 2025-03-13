@@ -51,19 +51,64 @@ def export_snapshot_to_s3():
 
     # 내보내기 완료 대기
     while True:
-        export_status = rds.describe_export_tasks(ExportTaskIdentifier=EXPORT_TASK_ID)["ExportTasks"][0]["Status"]
+        response = rds.describe_export_tasks(ExportTaskIdentifier=EXPORT_TASK_ID)
+        export_status = response["ExportTasks"][0]["Status"]
+        percent_progress = response["ExportTasks"][0].get("PercentProgress", 0)
+
         print(f"Export status: {export_status}, Progress: {percent_progress}%")
+
         if export_status == "complete":
+            print(f"Export task {EXPORT_TASK_ID} completed successfully.")
             break
-        time.sleep(30)
+        elif export_status == "failed":
+            failure_cause = response["ExportTasks"][0].get("FailureCause", "Unknown error")
+            print(f"Export task {EXPORT_TASK_ID} failed. Reason: {failure_cause}")
+            break
 
     print(f"Export task {EXPORT_TASK_ID} completed successfully.")
 
 def delete_rds_snapshot():
     """RDS 스냅샷 삭제"""
-    print(f"Deleting snapshot {SNAPSHOT_ID}...")
-    rds.delete_db_snapshot(DBSnapshotIdentifier=SNAPSHOT_ID)
-    print(f"Snapshot {SNAPSHOT_ID} deleted.")
+    print(f"Sending delete request for snapshot: {SNAPSHOT_ID}")
+
+    try:
+        response = rds.delete_db_snapshot(DBSnapshotIdentifier=SNAPSHOT_ID)
+        print(f"Delete request sent successfully. Response: {response}")
+
+    except rds.exceptions.ClientError as e:
+        if "DBSnapshotNotFound" in str(e):
+            print(f"Snapshot {SNAPSHOT_ID} already deleted (not found).")
+            return
+        else:
+            print(f"Error deleting snapshot: {e}")
+            return  # 오류 발생 시 함수 종료
+
+    print("Waiting for snapshot deletion confirmation...")
+
+    # 스냅샷 삭제 대기 (최대 15분)
+    timeout = time.time() + 900  # 900초 (15분) 후 타임아웃
+    while True:
+        try:
+            snapshots = rds.describe_db_snapshots(DBSnapshotIdentifier=SNAPSHOT_ID)
+            snapshot_status = snapshots["DBSnapshots"][0]["Status"]
+            print(f"Current snapshot status: {snapshot_status}")
+
+            if snapshot_status == "deleted":
+                print(f"Snapshot {SNAPSHOT_ID} deleted successfully.")
+                break
+
+        except rds.exceptions.ClientError as e:
+            if "DBSnapshotNotFound" in str(e):
+                print(f"Snapshot {SNAPSHOT_ID} successfully deleted (not found).")
+                break
+            else:
+                print(f"Error checking snapshot status: {e}")
+        
+        if time.time() > timeout:
+            print(f"Timeout reached! Snapshot {SNAPSHOT_ID} may still exist.")
+            break
+
+        time.sleep(30)  # 30초 대기 후 다시 확인
 
 if __name__ == "__main__":
     create_rds_snapshot()
