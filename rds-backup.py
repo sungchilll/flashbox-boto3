@@ -2,6 +2,7 @@ import boto3
 import time
 
 # AWS 클라이언트 생성
+session = boto3.Session(profile_name="default")
 rds = boto3.client("rds", region_name="ap-northeast-2")
 s3 = boto3.client("s3")
 
@@ -51,7 +52,7 @@ def export_snapshot_to_s3():
     # 내보내기 완료 대기
     while True:
         export_status = rds.describe_export_tasks(ExportTaskIdentifier=EXPORT_TASK_ID)["ExportTasks"][0]["Status"]
-        print(f"Export status: {export_status}")
+        print(f"Export status: {export_status}, Progress: {percent_progress}%")
         if export_status == "complete":
             break
         time.sleep(30)
