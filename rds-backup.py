@@ -50,38 +50,38 @@ def export_snapshot_to_s3():
     )
 
     # 내보내기 완료 대기
+    timeout = time.time() + 900 # 15분 타임아웃
     while True:
         response = rds.describe_export_tasks(ExportTaskIdentifier=EXPORT_TASK_ID)
         export_status = response["ExportTasks"][0]["Status"]
-        percent_progress = response["ExportTasks"][0].get("PercentProgress", 0)
-
-        print(f"Export status: {export_status}, Progress: {percent_progress}%")
+        print(f"Export status: {export_status}")
 
         if export_status == "complete":
             print(f"Export task {EXPORT_TASK_ID} completed successfully.")
+            break  # 무한 루프에서 빠져나오기!
+
+        if time.time() > timeout:
+            print(f"⏳ Timeout reached! Export task {EXPORT_TASK_ID} may still be running.")
             break
-        elif export_status == "failed":
-            failure_cause = response["ExportTasks"][0].get("FailureCause", "Unknown error")
-            print(f"Export task {EXPORT_TASK_ID} failed. Reason: {failure_cause}")
-            break
+
+        time.sleep(30)
 
     print(f"Export task {EXPORT_TASK_ID} completed successfully.")
 
 def delete_rds_snapshot():
     """RDS 스냅샷 삭제"""
-    print(f"Sending delete request for snapshot: {SNAPSHOT_ID}")
-
+    print(f"Deleting snapshot {SNAPSHOT_ID}...")
     try:
         response = rds.delete_db_snapshot(DBSnapshotIdentifier=SNAPSHOT_ID)
         print(f"Delete request sent successfully. Response: {response}")
-
+    
     except rds.exceptions.ClientError as e:
         if "DBSnapshotNotFound" in str(e):
             print(f"Snapshot {SNAPSHOT_ID} already deleted (not found).")
             return
         else:
             print(f"Error deleting snapshot: {e}")
-            return  # 오류 발생 시 함수 종료
+            return  # 오류 발생 시 함수 종료 
 
     print("Waiting for snapshot deletion confirmation...")
 
@@ -105,13 +105,18 @@ def delete_rds_snapshot():
                 print(f"Error checking snapshot status: {e}")
         
         if time.time() > timeout:
-            print(f"Timeout reached! Snapshot {SNAPSHOT_ID} may still exist.")
+            print(f"⏳ Timeout reached! Snapshot {SNAPSHOT_ID} may still exist.")
             break
 
-        time.sleep(30)  # 30초 대기 후 다시 확인
+        time.sleep(30)
 
 if __name__ == "__main__":
+    print("Starting RDS Snapshot Backup Process...", flush=True)
     create_rds_snapshot()
+    print("Snapshot creation completed. Proceeding to export...", flush=True)
+
     export_snapshot_to_s3()
+    print("Export to S3 completed. Proceeding to delete snapshot...", flush=True)
+
     delete_rds_snapshot()
-    print("RDS Snapshot backup and cleanup completed.")
+    print("RDS Snapshot backup and cleanup completed.", flush=True)
